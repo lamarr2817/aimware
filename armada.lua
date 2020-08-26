@@ -1,11 +1,11 @@
 local meta = {
-    version = 1.1,
+    version = 1.3,
     name = "Armada",
     git_source = "https://raw.githubusercontent.com/lamarr2817/aimware/master/armada.lua",
     git_version = "https://raw.githubusercontent.com/lamarr2817/aimware/master/armada_verison"
 }
 
-local viewangles = {
+local anglecache = {
     camera,
     real,
     lby,
@@ -15,11 +15,12 @@ local gcache = {
     doubletapping = false,
     shot = false
 }
+local choketime;
 
 local tab = gui.Tab(gui.Reference("Ragebot"), string.lower(meta.name) .. ".tab", meta.name)
-local versiontext = gui.Text(tab, meta.version)
+local versiontext = gui.Text(tab, "Armada v" .. meta.version)
 versiontext:SetPosY(500)
-versiontext:SetPosX(595)
+versiontext:SetPosX(570)
 local gbox = gui.Groupbox(tab, "Anti-Aim", 16, 16, 296, 5)
 local gbox_extra = gui.Groupbox(tab, "Extra", 328, 16, 296, 5)
 local gui_enable = gui.Checkbox(gbox, "lua.armada.enable", "Enable Armada", 1)
@@ -31,25 +32,28 @@ gui_armada_aa_delay:SetDescription("Delay between LBY updates.")
 
 local gui_armada_aa_bridge = gui.Checkbox(gbox, "lua.armada.bridge", "LBY Bridge", 0)
 gui_armada_aa_bridge:SetDescription("Changes your LBY before and after updating.")
-local gui_armada_aa_bridge_base = gui.Combobox(gbox, "lua.armada.bridge.base", "LBY Bridge Base", "Current", "Desync", "Real", "Localview")
-local gui_armada_aa_bridge_type = gui.Combobox(gbox, "lua.armada.bridge.type", "LBY Bridge Modifier", "Add", "Subtract", "Invert", "Sway")
-local gui_armada_aa_bridge_amount = gui.Slider(gbox, "lua.armada.bridge.amount", "LBY Bridge Amount", 0, 0, 180)
-gui_armada_aa_bridge_amount:SetDescription("Also controls sway range.")
+local gui_armada_aa_bridge_type = gui.Combobox(gbox, "lua.armada.bridge.type", "LBY Bridge Modifier", "Mod", "Sway")
+local gui_armada_aa_bridge_amount = gui.Slider(gbox, "lua.armada.bridge.amount", "LBY Bridge Amount", 0, -58, 58)
+gui_armada_aa_bridge_amount:SetDescription("Also controls sway speed.")
 
 local gui_armada_doubletap = gui.Checkbox(gbox_extra, "lua.armada.rbot.doubletap", "Double-Tap", 0)
 gui_armada_doubletap:SetDescription("Increases double-tap speed and consistency.")
 
-local gui_armada_shotswitch = gui.Checkbox(gbox_extra, "lua.armada.shotswitch", "Switch Desync On Shot", 0)
-gui_armada_shotswitch:SetDescription("Switches your desync direction after every shot.")
-local gui_armada_slowjitter = gui.Checkbox(gbox_extra, "lua.armada.slowwalk", "Jitter Slowwalk Speed", 0)
-local gui_armada_slowjitter_min = gui.Slider(gbox_extra, "lua.armada.slowwalk.min", "Minimum Slowwalk Speed", 15, 0, 100)
-local gui_armada_slowjitter_max = gui.Slider(gbox_extra, "lua.armada.slowwalk.max", "Max Slowwalk Speed", 65, 0, 100)
+local gui_armada_shotswitch = gui.Checkbox(gbox_extra, "lua.armada.shotswitch", "Switch Desync Side On Shot", 0)
+gui_armada_shotswitch:SetDescription("If a jitter desync is selected, it will switch jitter side.")
+local gui_armada_aa_slowjitter = gui.Checkbox(gbox_extra, "lua.armada.slowwalk", "Jitter Slowwalk Speed", 0)
+local gui_armada_aa_slowjitter_min = gui.Slider(gbox_extra, "lua.armada.slowwalk.min", "Minimum Slowwalk Speed", 15, 0, 100)
+local gui_armada_aa_slowjitter_max = gui.Slider(gbox_extra, "lua.armada.slowwalk.max", "Max Slowwalk Speed", 65, 0, 100)
 
 local function switch(var)
     if var == 1 then
         return 2
-    else
+    elseif var == 2 then
         return 1
+    elseif var == 3 then
+        return 4
+    elseif var == 4 then
+        return 3
     end
 end
 
@@ -59,8 +63,7 @@ local function update()
         local current_script = file.Open(GetScriptName(), "w")
         current_script:Write(http.Get(meta.git_source))
         current_script:Close()
-        gui.Command("lua.run " .. GetScriptName())
-    else
+        LoadScript(GetScriptName())
         print("[ARMADA] Script is up-to-date.")
     end
 end
@@ -68,49 +71,35 @@ end
 update()
 
 local function bridge()
-    local base = gui_armada_aa_bridge_base:GetValue()
     local type = gui_armada_aa_bridge_type:GetValue()
     local amount = gui_armada_aa_bridge_amount:GetValue()
-    local cache_bridge = {a, b}
 
-    if base == 0 then
-        cache_bridge.b = viewangles.lby
-    elseif base == 1 then
-        cache_bridge.b = viewangles.desync
-    elseif base == 2 then
-        cache_bridge.b = viewangles.real
-    elseif base == 3 then
-        cache_bridge.b = viewangles.camera
-    end
+    local cache_b = {
+        [0] = amount,
+        [1] = (math.sin((globals.RealTime() * amount / 10)) * 140)
+    }
 
-    if type == 0 then
-        cache_bridge.a = amount
-    elseif type == 1 then
-        cache_bridge.a = -amount
-    elseif type == 2 then
-        cache_bridge.a = -(cache_bridge.b * 2)
-    elseif type == 3 then
-        cache_bridge.a = math.cos((globals.RealTime() * 2.6)) * amount
-    end
-
-    return (cache_bridge.b + cache_bridge.a)
+    return (anglecache.real + cache_b[type])
 end
 
-callbacks.Register("Draw", function()
+local function handleGui()
     gui_armada_aa_delay:SetInvisible(not gui_armada_aa:GetValue())
     gui_armada_aa_bridge:SetInvisible(not gui_armada_aa:GetValue())
     gui_armada_aa_bridge_type:SetInvisible(not gui_armada_aa_bridge:GetValue() or not gui_armada_aa:GetValue())
     gui_armada_aa_bridge_amount:SetInvisible(not gui_armada_aa_bridge:GetValue() or not gui_armada_aa:GetValue())
-    gui_armada_aa_bridge_base:SetInvisible(not gui_armada_aa_bridge:GetValue() or not gui_armada_aa:GetValue())
-    gui_armada_slowjitter_min:SetInvisible(not gui_armada_slowjitter:GetValue())
-    gui_armada_slowjitter_max:SetInvisible(not gui_armada_slowjitter:GetValue())
+    gui_armada_aa_slowjitter_min:SetInvisible(not gui_armada_aa_slowjitter:GetValue())
+    gui_armada_aa_slowjitter_max:SetInvisible(not gui_armada_aa_slowjitter:GetValue())
+end
+
+callbacks.Register("Draw", function()
+    handleGui()
     if gcache.shot then
         gui.SetValue("rbot.antiaim.fakeyawstyle", switch(gui.GetValue("rbot.antiaim.fakeyawstyle")))
         gcache.shot = false
     end
-    if gui_armada_slowjitter:GetValue() then
-        if input.IsButtonDown(gui.GetValue("rbot.accuracy.movement.slowkey")) and (globals.TickCount() % 12 == 0) then
-            gui.SetValue("rbot.accuracy.movement.slowspeed", math.random(gui_armada_slowjitter_min:GetValue(), gui_armada_slowjitter_max:GetValue()))
+    if gui_armada_aa_slowjitter:GetValue() then
+        if input.IsButtonDown(gui.GetValue("rbot.accuracy.movement.slowkey")) and (globals.TickCount() % 13 == 0) then
+            gui.SetValue("rbot.accuracy.movement.slowspeed", math.random(gui_armada_aa_slowjitter_min:GetValue(), gui_armada_aa_slowjitter_max:GetValue()))
         end
     end
 end)
@@ -119,13 +108,8 @@ callbacks.Register("CreateMove", function(cmd)
     local lp = entities.GetLocalPlayer()
     if not lp or not lp:IsAlive() or not gui_enable:GetValue() then return end
     --\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-    if cmd.sendpacket then
-        viewangles.desync = viewangles.real
-    else
-        viewangles.real = cmd.viewangles.y
-    end
-    viewangles.camera = entities.GetLocalPlayer():GetProp("m_angEyeAngles[1]")
-    viewangles.lby = entities.GetLocalPlayer():GetProp("m_flLowerBodyYawTarget")
+    anglecache.lby = lp:GetProp("m_flLowerBodyYawTarget")
+    anglecache.real = lp:GetProp("m_angEyeAngles[1]")
     --///////////////////////////////////////////////////////////////////////////////////
     if gui_armada_aa:GetValue() then
         if (globals.TickCount() % gui_armada_aa_delay:GetValue() == 0) and not gcache.doubletapping then
@@ -148,14 +132,14 @@ end )
 
 callbacks.Register("FireGameEvent", function(event)
 
-    if ( event:GetName() == 'weapon_fire' ) then
+    if (event:GetName() == 'weapon_fire') then
 
         local lp = client.GetLocalPlayerIndex()
         local int_shooter = event:GetInt('userid')
         local index_shooter = client.GetPlayerIndexByUserID(int_shooter)
 
         if ( index_shooter == lp) then
-            if gui_armada_rbot_doubletap:GetValue() then
+            if gui_armada_doubletap:GetValue() then
                 gcache.doubletapping = true
             end
             if gui_armada_shotswitch:GetValue() then
@@ -165,4 +149,4 @@ callbacks.Register("FireGameEvent", function(event)
     end
 end)
 
-client.AllowListener( 'weapon_fire' )
+client.AllowListener('weapon_fire')
