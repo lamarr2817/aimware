@@ -15,7 +15,6 @@ local gcache = {
     doubletapping = false,
     shot = false
 }
-local choketime;
 
 local tab = gui.Tab(gui.Reference("Ragebot"), string.lower(meta.name) .. ".tab", meta.name)
 local versiontext = gui.Text(tab, "Armada v" .. meta.version)
