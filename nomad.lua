@@ -1,3 +1,5 @@
+-- please don't look at this code it's the worst possible thing
+
 local bDtap, fPlayerRealAngle, fPlayerDesyncAngle, fDesyncAmount, fRawDesyncAmount, fAlpha = 1, 1, 1, 1, 1, 1; -- this looks bad but fixes an annoying console message
 local brute_target, oldtarget;
 local debug = false; -- enabling this really just spams your console
