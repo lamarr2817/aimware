@@ -1,5 +1,3 @@
--- please don't look at this code it's the worst possible thing
-
 local bDtap, fPlayerRealAngle, fPlayerDesyncAngle, fDesyncAmount, fRawDesyncAmount, fAlpha = 1, 1, 1, 1, 1, 1; -- this looks bad but fixes an annoying console message
 local brute_target, oldtarget;
 local debug = false; -- enabling this really just spams your console
@@ -24,8 +22,7 @@ local options = {
     dtfix = gui.Checkbox(gui_gbox_extra, "nomad.dtfix", "Double-Tap Fix", 1), -- double tap speed fix
     xhair = gui.Checkbox(gui_gbox_extra, "nomad.xhair", "Nomad Crosshair", 0), -- crosshair
     xhairsize = gui.Slider(gui_gbox_extra, "nomad.xhair.size", "Crosshair Size", 12, 1, 25), -- crosshair size adjust
-    wavemode = gui.Combobox(gui_gbox_wave, "nomad.wave.mode", "Wave Mode", "Forward", "Backwards"), -- When you want to peek your real
-    wavespeed = gui.Slider(gui_gbox_wave, "nomad.wave.speed", "Wave Speed", 1, 1, 6), -- wave speed
+    wavespeed = gui.Slider(gui_gbox_wave, "nomad.wave.speed", "Wave Speed", 1, -6, 6), -- wave speed
     brute_desync = gui.Slider(gui_gbox_abf, "nomad.abf.desync", "Desync Delta Offset", 6, 1, 12),
     brute_real = gui.Slider(gui_gbox_abf, "nomad.abf.real", "Real Delta Offset", 0, 0, 12),
     hitsound = gui.Checkbox(gui_gbox_extra, "nomad.hitsound", "Hitsound", 0),
@@ -75,7 +72,7 @@ local peekside = {
     [1] = "Real"
 }
 
-local function getBruteTarget() -- 100% pasted from Advanced Anti-Bruteforce, if you made the original lua PM me for credit
+local function getBruteTarget() -- 100% pasted from Advanced Anti-Bruteforce, if you made the original lua PM me for credit (may be replaced and optimized soon)
     local bestEntity;
     local lp = entities.GetLocalPlayer()
     if not lp or not lp:IsAlive() then return end
@@ -104,7 +101,7 @@ local function getBruteTarget() -- 100% pasted from Advanced Anti-Bruteforce, if
     brute_target = bestEntity
 end
 
-local function handleLBY()
+local function handleLBY() -- part of APL. in my experience, forcing your lby to your desync angle works the best. on most cheats with safe point on, they'll shoot between your desync and your real.
 
     local mode = options.aamode:GetValue()
     local lp = entities.GetLocalPlayer()
@@ -126,116 +123,82 @@ local function handleLBY()
 end
 
 local function isOverlapping()
-
-    if fDesyncAmount < options.overlap_threshold:GetValue() then
-        return true; -- desync and real head are overlapping, bad(?)
-    else
-        return false; -- good(?)
-    end
+    return fDesyncAmount <= options.overlap_threshold:GetValue()
 end
 
-local function handleAA()
+local function setDesync(val)
+    gui.SetValue("rbot.antiaim.desync", val)
+    gui.SetValue("rbot.antiaim.desyncleft", val)
+    gui.SetValue("rbot.antiaim.desyncright", val)
+end
 
-    local mode = options.aamode:GetValue()
+local function handleAPL() -- good against anything with the right config. proud of how this came out and how well it works tbh
+    if options.aamode:GetValue() ~= 1 then return end
     local plemode = options.mode:GetValue()
     local gap_desync = options.gap_desync:GetValue()
     local gap_real = options.gap_real:GetValue()
-    local delay = options.delay:GetValue()
-    local wavemode = options.wavemode:GetValue()
-    local wavespeed = options.wavespeed:GetValue()
 
-    if mode == 1 then               -- anti prediction/logic (good against almost everything)
-        if not isOverlapping() then
-            gui.SetValue("rbot.antiaim.desyncleft", 58 - gap_desync) -- if not overlapping, reduce your desync by the gap selected in gui
-            gui.SetValue("rbot.antiaim.desyncright", 58 - gap_desync)
-            gui.SetValue("rbot.antiaim.desync", 58 - gap_desync)
-            gui.SetValue("rbot.antiaim.fakeyawstyle", 2) -- desync right
-            gui.SetValue("rbot.antiaim.autodirmode", plemode) -- peeks real depending on gui selection
-            gui.SetValue("rbot.antiaim.yaw", 180 - gap_real) -- real gap
+    if not isOverlapping() then
+        setDesync(58 - gap_desync) -- if not overlapping, reduce your desync by the gap selected in gui
+        gui.SetValue("rbot.antiaim.fakeyawstyle", 2) -- desync right
+        gui.SetValue("rbot.antiaim.autodirmode", plemode) -- peeks real depending on gui selection
+        gui.SetValue("rbot.antiaim.yaw", 180 - gap_real) -- real gap
+    else
+        setDesync(58) -- if overlapping, maximize desync
+        gui.SetValue("rbot.antiaim.fakeyawstyle", 1) -- desync left
+        gui.SetValue("rbot.antiaim.autodirmode", not plemode)
+        gui.SetValue("rbot.antiaim.yaw", -180 + gap_real) -- flip your gap, this helps you keep your head behind a wall otherwise you peek a lot.
+    end
+end
+
+local function handleFakeDesync() -- skeet will destroy this, but good against nixware, otc, aw, and ot.
+
+    if options.aamode:GetValue() ~= 2 then return end
+    local delay = options.delay:GetValue()
+
+    if globals.TickCount() % delay == 0 then
+        setDesync(0) -- nope im not desyncing
+        gui.SetValue("rbot.antiaim.yaw", 180)
+    else
+        setDesync(1) -- wait yes i am ooOOoOooo
+        gui.SetValue("rbot.antiaim.yaw", 179)
+    end
+end
+
+local function handleDesyncWave() -- skeet will SMOKE this antiaim. nixware and otc will dump tho, aimware and ot are 50/50
+    if options.aamode:GetValue() ~= 3 then return end
+    local wavespeed = options.wavespeed:GetValue()
+    if wavespeed > 0 then -- forward
+        if gui.GetValue("rbot.antiaim.desync") == 58 then -- this makes it snap back
+            setDesync(0)
         else
-            gui.SetValue("rbot.antiaim.desyncleft", 58) -- if overlapping, maximize desync
-            gui.SetValue("rbot.antiaim.desyncright", 58)
-            gui.SetValue("rbot.antiaim.desync", 58)
-            gui.SetValue("rbot.antiaim.fakeyawstyle", 1) -- desync left
-            gui.SetValue("rbot.antiaim.autodirmode", not plemode)
-            gui.SetValue("rbot.antiaim.yaw", -180 + gap_real) -- flip your gap, this helps you keep your head behind a wall otherwise you peek a lot.
+            setDesync(gui.GetValue("rbot.antiaim.desync") + wavespeed) -- tried using tickcount but it was too slow, might try other timers because it seems fast
         end
-    elseif mode == 2 then           -- Fake desync (good against most cheats)
-        if globals.TickCount() % delay == 0 then
-            gui.SetValue("rbot.antiaim.desync", 0) -- nope im not desyncing
-            gui.SetValue("rbot.antiaim.desyncleft", 0)
-            gui.SetValue("rbot.antiaim.desyncright", 0)
-            gui.SetValue("rbot.antiaim.yaw", 180)
+    elseif wavespeed < 0 then -- backwards
+        if gui.GetValue("rbot.antiaim.desync") == 0 then
+            setDesync(58)
         else
-            gui.SetValue("rbot.antiaim.desync", 1) -- wait yes i am ooOOoOooo
-            gui.SetValue("rbot.antiaim.desyncleft", 1)
-            gui.SetValue("rbot.antiaim.desyncright", 1)
-            gui.SetValue("rbot.antiaim.yaw", 179)
-        end
-    elseif mode == 3 then               -- desync wave (nixware and otc DUMP this for some reason, scouters always miss)
-        if wavemode == 0 then -- forward
-            if gui.GetValue("rbot.antiaim.desync") == 58 then -- this makes it snap back
-                gui.SetValue("rbot.antiaim.desync", 0)
-                gui.SetValue("rbot.antiaim.desyncleft", 0)
-                gui.SetValue("rbot.antiaim.desyncright", 0)
-            else
-                gui.SetValue("rbot.antiaim.desync", gui.GetValue("rbot.antiaim.desync") + wavespeed) -- tried using tickcount but it was too slow, might try other timers because it seems fast
-                gui.SetValue("rbot.antiaim.desyncleft", gui.GetValue("rbot.antiaim.desync") + wavespeed)
-                gui.SetValue("rbot.antiaim.desyncright", gui.GetValue("rbot.antiaim.desync") + wavespeed)
-            end
-        elseif wavemode == 1 then -- backwards
-            if gui.GetValue("rbot.antiaim.desync") == 0 then
-                gui.SetValue("rbot.antiaim.desync", 58)
-                gui.SetValue("rbot.antiaim.desyncleft", 58)
-                gui.SetValue("rbot.antiaim.desyncright", 58)
-            else
-                gui.SetValue("rbot.antiaim.desync", gui.GetValue("rbot.antiaim.desync") - wavespeed)
-                gui.SetValue("rbot.antiaim.desyncleft", gui.GetValue("rbot.antiaim.desync") - wavespeed)
-                gui.SetValue("rbot.antiaim.desyncright", gui.GetValue("rbot.antiaim.desync") - wavespeed)
-            end
+            setDesync(gui.GetValue("rbot.antiaim.desync") + wavespeed)
         end
     end
 end
 
 local function handleGUI() -- please dont look at this
 
-    indicator_text[1]:SetPosY(17)
-    if options.indicator:GetValue() == 1 then
-        gui_window_indicators:SetActive(1)
-    else
-        gui_window_indicators:SetActive(0)
-    end
+    local mode = options.aamode:GetValue()
 
-    if options.aamode:GetValue() == 0 then -- off
-        gui_gbox_ple:SetInvisible(1)
-        gui_gbox_fakedesync:SetInvisible(1)
-        gui_gbox_wave:SetInvisible(1)
-        gui_gbox_abf:SetInvisible(1)
-    elseif options.aamode:GetValue() == 1 then -- prediction
-        gui_gbox_fakedesync:SetInvisible(1)
-        gui_gbox_wave:SetInvisible(1)
-        gui_gbox_abf:SetInvisible(1)
-        gui_gbox_ple:SetInvisible(0)
-        gui.SetValue("rbot.antiaim.lbyextend", 1)
-    elseif options.aamode:GetValue() == 2 then -- fakedesync
-        gui_gbox_ple:SetInvisible(1)
-        gui_gbox_wave:SetInvisible(1)
-        gui_gbox_abf:SetInvisible(1)
-        gui_gbox_fakedesync:SetInvisible(0)
-        gui.SetValue("rbot.antiaim.lbyextend", 0)
-    elseif options.aamode:GetValue() == 3 then -- desync wave
-        gui_gbox_ple:SetInvisible(1)
-        gui_gbox_fakedesync:SetInvisible(1)
-        gui_gbox_abf:SetInvisible(1)
-        gui_gbox_wave:SetInvisible(0)
-        gui.SetValue("rbot.antiaim.lbyextend", 0)
-    elseif options.aamode:GetValue() == 4 then -- anti-bruteforce
-        gui_gbox_ple:SetInvisible(1)
-        gui_gbox_fakedesync:SetInvisible(1)
-        gui_gbox_wave:SetInvisible(1)
-        gui_gbox_abf:SetInvisible(0)
-        gui.SetValue("rbot.antiaim.lbyextend", 0)
-    end -- i try to avoid these big elseifs but tbh i dont know another way to do it without completely rearranging and redesigning my gui system with keywords
+    indicator_text[1]:SetPosY(17)
+
+    -- some boolean logic to simplify menu code // Scape
+    gui_gbox_ple:SetInvisible( mode ~= 1)        -- prediction      (mode 1)
+    gui_gbox_fakedesync:SetInvisible(mode ~= 2) -- fake desync      (mode 2)
+    gui_gbox_wave:SetInvisible(mode ~= 3)       -- wave             (mode 3)
+    gui_gbox_abf:SetInvisible(mode ~= 4)        -- anti-bruteforce  (mode 4)
+    gui_window_indicators:SetActive(options.indicator:GetValue() == 1)
+
+    if mode ~= 0 then
+        gui.SetValue("rbot.antiaim.lbyextend", mode == 1)
+    end
 
     options.xhairsize:SetInvisible(not options.xhair:GetValue())
 
@@ -274,18 +237,16 @@ local function handleCrosshair() -- fun fact this is just a copy of my team fort
 
 end
 
-local function handleBruteAA()
+local function handleBruteAA() -- it's a 50/50 whether this will work against anything due to the random nature of it currently. will use some type of bullet path detection in the future though.
     local real, desync = options.brute_real:GetValue(), options.brute_desync:GetValue()
-    local dmod = math.random(1, 10) / 4
+    local dmod = math.random(1, 8)
     local yawdmod = math.random(1, 2)
     if debug then
         print("[ABF] Delta Modifier:" .. dmod)
         print("[ABF] Yaw Modifier: " .. yawdmod)
     end
 
-    gui.SetValue("rbot.antiaim.desyncleft", 58 - desync * dmod)
-    gui.SetValue("rbot.antiaim.desyncright", 58 - desync * dmod)
-    gui.SetValue("rbot.antiaim.desync", 58 - desync * dmod)
+    setDesync(58 - desync * dmod)
     gui.SetValue("rbot.antiaim.fakeyawstyle", yawdmod)
     gui.SetValue("rbot.antiaim.yaw", 180 - real * dmod)
 
@@ -355,6 +316,7 @@ callbacks.Register("CreateMove", function(cmd)
 
     handleDesyncInfo(cmd); -- wish there was a better way to do this so i could still pass args, maybe there is idk
     handleDoubleTap(cmd);
+
 end)
 
 callbacks.Register("Draw", function()
@@ -362,11 +324,14 @@ callbacks.Register("Draw", function()
     handleGUI(); -- want this running in main menu so newbies can explore it when not ingame
     local lp = entities.GetLocalPlayer()
     if not lp or not lp:IsAlive() then return end
-    isOverlapping(); -- you might be like 'huh' but i've found it helps keep the indicator up-to-date. not sure why tbh
-    handleAA();
-    handleLBY();
+    isOverlapping(); -- keeps indicator up-to-date, otherwise should only be used internally
+    handleDesyncWave(); -- desync wave
+    handleFakeDesync(); -- fake desync
+    handleAPL();        -- anti prediction/logic
+    handleLBY();        -- part of APL (may add to other antiaims)
     handleCrosshair();
     getBruteTarget();
+
 end)
 
 callbacks.Register("FireGameEvent", function(event)
