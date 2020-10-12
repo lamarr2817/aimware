@@ -1,5 +1,4 @@
 local bDtap, fPlayerRealAngle, fPlayerDesyncAngle, fDesyncAmount, fRawDesyncAmount, fAlpha = 1, 1, 1, 1, 1, 1; -- this looks bad but fixes an annoying console message
-local brute_target, oldtarget;
 local debug = false; -- enabling this really just spams your console
 local gui_window_indicators = gui.Window("nomad.window.indicators", "", 5, 425, 135, 150) -- i maybe could put these in a table but i've had problems with them in the past and it's at the top of the code so no reason
 local gui_tab = gui.Tab(gui.Reference("Ragebot"), "nomad.tab", "Nomad")
@@ -7,24 +6,21 @@ local gui_gbox_aa = gui.Groupbox(gui_tab, "Anti-Aim", 16, 16, 296, 5) -- fuck sp
 local gui_gbox_ple = gui.Groupbox(gui_tab, "Anti-Prediction/Logic", 16, 138, 296, 5) -- neato trick instead of using one groupbox just make one for every set of options in the same location, then hide the other groupboxes
 local gui_gbox_fakedesync = gui.Groupbox(gui_tab, "Fake Desync", 16, 138, 296, 5)
 local gui_gbox_wave = gui.Groupbox(gui_tab, "Desync Wave", 16, 138, 296, 5)
-local gui_gbox_abf = gui.Groupbox(gui_tab, "[Proto] Anti-Bruteforce", 16, 138, 296, 5)
 local gui_gbox_extra = gui.Groupbox(gui_tab, "Extra", 328, 16, 296, 5)
 
 local options = {
     -- i keep everything in tables that i can because it lets me fold them in IDE
-    aamode = gui.Combobox(gui_gbox_aa, "nomad.mode", "Anti-Aim Mode", "Off", "Anti-Prediction/Logic", "Fake Desync", "Desync Wave", "Anti-Bruteforce"), -- anti-aim mode
+    aamode = gui.Combobox(gui_gbox_aa, "nomad.mode", "Anti-Aim Mode", "Off", "Anti-Prediction/Logic", "Fake Desync", "Desync Wave"), -- anti-aim mode
     mode = gui.Combobox(gui_gbox_ple, "nomad.ple.mode", "Peek Real Mode", "Overlapping", "Not Overlapping"), -- When you want to peek your real
     gap_desync = gui.Slider(gui_gbox_ple, "nomad.ple.gap.desync", "Desync Gap", 29, 0, 58), -- How much to reduce your desync when not overlapping
     gap_real = gui.Slider(gui_gbox_ple, "nomad.ple.gap.real", "Real Gap", 3, 0, 58), -- Yaw offset, for more customization
-    overlap_threshold = gui.Slider(gui_gbox_ple, "nomad.ple.overlap.threshold", "Overlap Threshold", 16, 1, 58), -- How close your real has to be to your desync to be considered overlapping
-    lby_mode = gui.Combobox(gui_gbox_ple, "nomad.ple.lby.mode", "LBY Mode", "Default", "Between", "Desync", "Real", "Opposite", "Spin", "Random"), -- LBY customization
+    overlap_threshold = gui.Slider(gui_gbox_extra, "nomad.overlap.threshold", "Overlap Threshold", 16, 1, 58), -- How close your real has to be to your desync to be considered overlapping
+    lby_mode = gui.Combobox(gui_gbox_extra, "nomad.lby.mode", "LBY Mode", "Default", "Desync", "Real", "Between", "Opposite", "Spin", "Lisp"), -- LBY customization
     delay = gui.Slider(gui_gbox_fakedesync, "nomad.fd.delay", "Desync Delay", 7, 2, 14), -- Fake desync delay
     dtfix = gui.Checkbox(gui_gbox_extra, "nomad.dtfix", "Double-Tap Fix", 1), -- double tap speed fix
     xhair = gui.Checkbox(gui_gbox_extra, "nomad.xhair", "Nomad Crosshair", 0), -- crosshair
     xhairsize = gui.Slider(gui_gbox_extra, "nomad.xhair.size", "Crosshair Size", 12, 1, 25), -- crosshair size adjust
     wavespeed = gui.Slider(gui_gbox_wave, "nomad.wave.speed", "Wave Speed", 1, -6, 6), -- wave speed
-    brute_desync = gui.Slider(gui_gbox_abf, "nomad.abf.desync", "Desync Delta Offset", 6, 1, 12),
-    brute_real = gui.Slider(gui_gbox_abf, "nomad.abf.real", "Real Delta Offset", 0, 0, 12),
     hitsound = gui.Checkbox(gui_gbox_extra, "nomad.hitsound", "Hitsound", 0),
     indicator = gui.Combobox(gui_gbox_extra, "nomad.indicator", "Indicator", "Off", "Aimware") -- Show aimware indicator window
 }
@@ -72,56 +68,6 @@ local peekside = {
     [1] = "Real"
 }
 
-local function getBruteTarget() -- 100% pasted from Advanced Anti-Bruteforce, if you made the original lua PM me for credit (may be replaced and optimized soon)
-    local bestEntity;
-    local lp = entities.GetLocalPlayer()
-    if not lp or not lp:IsAlive() then return end
-
-    local players = entities.FindByClass("CCSPlayer");
-    for i = 1, #players do
-        if players[i]:GetTeamNumber() == lp:GetTeamNumber() or not players[i]:IsAlive() then
-            players[i] = nil;
-        end
-    end
-
-    for i = 1, #players do
-        local player = players[i];
-
-        if player and player:GetIndex() ~= lp:GetIndex() then
-            local localPos = lp:GetAbsOrigin();
-            local playerPos = player:GetAbsOrigin();
-
-            localPos.z = localPos.z + lp:GetPropVector("localdata", "m_vecViewOffset[0]").z;
-            playerPos.z = playerPos.z + player:GetPropVector("localdata", "m_vecViewOffset[0]").z;
-
-            bestEntity = player;
-
-        end
-    end
-    brute_target = bestEntity
-end
-
-local function handleLBY() -- part of APL. in my experience, forcing your lby to your desync angle works the best. on most cheats with safe point on, they'll shoot between your desync and your real.
-
-    local mode = options.aamode:GetValue()
-    local lp = entities.GetLocalPlayer()
-    local lby = lp:GetProp("m_flLowerBodyYawTarget")
-    local lbymode = options.lby_mode:GetValue() -- "Default", "Between", "Desync", "Real", "Opposite", "Spin", "Random"
-
-    if lbymode < 1 or mode ~= 1 then return end
-
-    local angles = {
-        -- default isn't listed because it's just not editing it at all.
-        (fPlayerRealAngle + fPlayerDesyncAngle) / 2, -- between
-        fPlayerDesyncAngle, -- desync (better than you might think)
-        fPlayerRealAngle, -- real
-        ((fPlayerRealAngle + fPlayerDesyncAngle) / 2) + 180, -- opposite
-        lby + 10, -- spin
-        math.random(-180, 180) -- random (kinda useless)
-    }
-    lp:SetProp("m_flLowerBodyYawTarget", angles[lbymode])
-end
-
 local function isOverlapping()
     return fDesyncAmount <= options.overlap_threshold:GetValue()
 end
@@ -130,6 +76,31 @@ local function setDesync(val)
     gui.SetValue("rbot.antiaim.desync", val)
     gui.SetValue("rbot.antiaim.desyncleft", val)
     gui.SetValue("rbot.antiaim.desyncright", val)
+end
+
+local function handleLBY() -- now global :)
+
+    local lp = entities.GetLocalPlayer()
+    local lby = lp:GetProp("m_flLowerBodyYawTarget")
+    local lbymode = options.lby_mode:GetValue() -- "Default", "Desync", "Real", "Between", "Opposite", "Spin", "Lisp"
+
+    if lbymode == 0 then
+        gui.SetValue("rbot.antiaim.lbyextend", 0)
+        return
+    else
+        gui.SetValue("rbot.antiaim.lbyextend", 1)
+    end
+
+    local angles = {
+        -- default isn't listed because it's just not editing it at all.
+        fPlayerDesyncAngle, -- desync (better than you might think)
+        fPlayerRealAngle, -- real
+        (fPlayerRealAngle + fPlayerDesyncAngle) / 2, -- between
+        ((fPlayerRealAngle + fPlayerDesyncAngle) / 2) + 180, -- opposite
+        lby + 5, -- spin
+        fPlayerRealAngle - (360 - fDesyncAmount * 2) -- lisp
+    }
+    lp:SetProp("m_flLowerBodyYawTarget", angles[lbymode])
 end
 
 local function handleAPL() -- good against anything with the right config. proud of how this came out and how well it works tbh
@@ -193,7 +164,6 @@ local function handleGUI() -- please dont look at this
     gui_gbox_ple:SetInvisible( mode ~= 1)        -- prediction      (mode 1)
     gui_gbox_fakedesync:SetInvisible(mode ~= 2) -- fake desync      (mode 2)
     gui_gbox_wave:SetInvisible(mode ~= 3)       -- wave             (mode 3)
-    gui_gbox_abf:SetInvisible(mode ~= 4)        -- anti-bruteforce  (mode 4)
     gui_window_indicators:SetActive(options.indicator:GetValue() == 1)
 
     if mode ~= 0 then
@@ -237,39 +207,17 @@ local function handleCrosshair() -- fun fact this is just a copy of my team fort
 
 end
 
-local function handleBruteAA() -- it's a 50/50 whether this will work against anything due to the random nature of it currently. will use some type of bullet path detection in the future though.
-    local real, desync = options.brute_real:GetValue(), options.brute_desync:GetValue()
-    local dmod = math.random(1, 8)
-    local yawdmod = math.random(1, 2)
-    if debug then
-        print("[ABF] Delta Modifier:" .. dmod)
-        print("[ABF] Yaw Modifier: " .. yawdmod)
-    end
-
-    setDesync(58 - desync * dmod)
-    gui.SetValue("rbot.antiaim.fakeyawstyle", yawdmod)
-    gui.SetValue("rbot.antiaim.yaw", 180 - real * dmod)
-
-end
-
 local function handleShooting(event)
 
-if not (event:GetName() == 'weapon_fire') or not brute_target then return end
+if not (event:GetName() == 'weapon_fire') then return end
 
     local lp = client.GetLocalPlayerIndex()
     local int_shooter = event:GetInt('userid')
     local index_shooter = client.GetPlayerIndexByUserID(int_shooter)
-    local brute_target = brute_target:GetIndex()
     if (index_shooter == lp) then
         if options.dtfix:GetValue() then
             bDtap = true;
             if debug then print("[DTFIX] Local Shot Registered") end
-        end
-    end
-    if (index_shooter == brute_target) then
-        if options.aamode:GetValue() == 4 then
-            if debug then print("[ABF] Target Shot Registered") end
-            handleBruteAA()
         end
     end
 end
@@ -330,7 +278,6 @@ callbacks.Register("Draw", function()
     handleAPL();        -- anti prediction/logic
     handleLBY();        -- part of APL (may add to other antiaims)
     handleCrosshair();
-    getBruteTarget();
 
 end)
 
