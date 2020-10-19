@@ -1,12 +1,17 @@
-local bDtap, fPlayerRealAngle, fPlayerDesyncAngle, fDesyncAmount, fRawDesyncAmount, fAlpha = 1, 1, 1, 1, 1, 1; -- this looks bad but fixes an annoying console message
+
+-- thanks a lot to Scape, Cheeseot, superyu and L.A for helping me
+-- especially Scape for just straight up contributing code
+
+local bDtap, fPlayerRealAngle, fPlayerDesyncAngle, fDesyncAmount, fRawDesyncAmount, fAlpha, iLastDamage, iLastArmorDamage = 1, 1, 1, 1, 1, 1, 1, 1; -- this looks bad but fixes annoying console messages because NiL vAlUeS rEeEeEeE
 local debug = false; -- enabling this really just spams your console
-local gui_window_indicators = gui.Window("nomad.window.indicators", "", 5, 425, 135, 150) -- i maybe could put these in a table but i've had problems with them in the past and it's at the top of the code so no reason
 local gui_tab = gui.Tab(gui.Reference("Ragebot"), "nomad.tab", "Nomad")
 local gui_gbox_aa = gui.Groupbox(gui_tab, "Anti-Aim", 16, 16, 296, 5) -- fuck spacing bro
 local gui_gbox_ple = gui.Groupbox(gui_tab, "Anti-Prediction/Logic", 16, 138, 296, 5) -- neato trick instead of using one groupbox just make one for every set of options in the same location, then hide the other groupboxes
 local gui_gbox_fakedesync = gui.Groupbox(gui_tab, "Fake Desync", 16, 138, 296, 5)
 local gui_gbox_wave = gui.Groupbox(gui_tab, "Desync Wave", 16, 138, 296, 5)
 local gui_gbox_extra = gui.Groupbox(gui_tab, "Extra", 328, 16, 296, 5)
+local gui_gbox_indicators = gui.Groupbox(gui_tab, "Indicators", 328, 343, 296, 5)
+local gui_mbox_indicators = gui.Multibox(gui_gbox_indicators, "Indicators")
 
 local options = {
     -- i keep everything in tables that i can because it lets me fold them in IDE
@@ -15,18 +20,23 @@ local options = {
     gap_desync = gui.Slider(gui_gbox_ple, "nomad.ple.gap.desync", "Desync Gap", 29, 0, 58), -- How much to reduce your desync when not overlapping
     gap_real = gui.Slider(gui_gbox_ple, "nomad.ple.gap.real", "Real Gap", 3, 0, 58), -- Yaw offset, for more customization
     overlap_threshold = gui.Slider(gui_gbox_extra, "nomad.overlap.threshold", "Overlap Threshold", 16, 1, 58), -- How close your real has to be to your desync to be considered overlapping
-    lby_mode = gui.Combobox(gui_gbox_extra, "nomad.lby.mode", "LBY Mode", "Default", "Desync", "Real", "Between", "Opposite", "Spin", "Lisp"), -- LBY customization
+    lby_mode = gui.Combobox(gui_gbox_extra, "nomad.lby.mode", "LBY Mode", "Default", "Desync", "Real", "Between", "Opposite", "Spin"), -- LBY customization
     delay = gui.Slider(gui_gbox_fakedesync, "nomad.fd.delay", "Desync Delay", 7, 2, 14), -- Fake desync delay
     dtfix = gui.Checkbox(gui_gbox_extra, "nomad.dtfix", "Double-Tap Fix", 1), -- double tap speed fix
     xhair = gui.Checkbox(gui_gbox_extra, "nomad.xhair", "Nomad Crosshair", 0), -- crosshair
     xhairsize = gui.Slider(gui_gbox_extra, "nomad.xhair.size", "Crosshair Size", 12, 1, 25), -- crosshair size adjust
     wavespeed = gui.Slider(gui_gbox_wave, "nomad.wave.speed", "Wave Speed", 1, -6, 6), -- wave speed
     hitsound = gui.Checkbox(gui_gbox_extra, "nomad.hitsound", "Hitsound", 0),
-    indicator = gui.Combobox(gui_gbox_extra, "nomad.indicator", "Indicator", "Off", "Aimware") -- Show aimware indicator window
+    indicator = gui.Combobox(gui_gbox_indicators, "nomad.indicators.style", "Indicator Style", "Off", "Classic") -- Indicator Style
+}
+
+local options_indicators = {
+    desync_side = gui.Checkbox(gui_mbox_indicators, "nomad.indicators.desync.side", "Desync Side", 1),
+    desync_amt = gui.Checkbox(gui_mbox_indicators, "nomad.indicators.desync.amount", "Desync Amount", 1),
+    damage = gui.Checkbox(gui_mbox_indicators, "nomad.indicators.damage", "Last Damage Dealt", 1)
 }
 
 local descriptions = {
-    -- again, just used to keep code cleaner in IDE
     options.mode:SetDescription("When to peek your real"),
     options.gap_desync:SetDescription("Desync to reduce when not overlapping"),
     options.gap_real:SetDescription("Amount to hide/peek"),
@@ -35,40 +45,7 @@ local descriptions = {
     options.xhair:SetDescription("Custom crosshair and hitmarker")
 }
 
-local labels = {
-    -- I should change "Overlapping" to things relating to the selected anti-aim mode, but i don't think it's really worth it
-    gui.Text(gui_window_indicators, "Overlapping:"),
-    gui.Text(gui_window_indicators, "Desync Side:"),
-    gui.Text(gui_window_indicators, "Desync Amt:"),
-    gui.Text(gui_window_indicators, "Peek Angle:")
-}
-
-local indicator_text = {
-    gui.Text(gui_window_indicators, "nil"), -- overlap
-    gui.Text(gui_window_indicators, "nil"), -- desync side
-    gui.Text(gui_window_indicators, "nil"), -- desync amount
-    gui.Text(gui_window_indicators, "nil") -- peeking side
-}
-
-for i = 1, #indicator_text do -- it's not lazy, it's efficient.
-    indicator_text[i]:SetPosX(85)
-end
-
-local desyncside = {
-    -- look guys i figured out how tables work :^)
-    [0] = "Off",
-    [1] = "Left",
-    [2] = "Right",
-    [3] = "JRight",
-    [4] = "JLeft"
-}
-
-local peekside = {
-    [0] = "Fake",
-    [1] = "Real"
-}
-
-local function isOverlapping()
+local function isOverlapping() -- thanks Scape :)
     return fDesyncAmount <= options.overlap_threshold:GetValue()
 end
 
@@ -78,15 +55,52 @@ local function setDesync(val)
     gui.SetValue("rbot.antiaim.desyncright", val)
 end
 
+local function handleIndicators()
+
+    if options.indicator:GetValue() == 0 then return end
+
+    local desyncside = {
+        [0] = "OFF",
+        [1] = "LEFT",
+        [2] = "RIGHT",
+        [3] = "JITTER RIGHT",
+        [4] = "JITTER LEFT"
+    }
+
+    if options.indicator:GetValue() == 1 then
+        local x, y = draw.GetScreenSize()
+        local cx, cy = x / 2, y / 2
+        local start = y * 0.77
+        local font = draw.CreateFont("Verdana Bold", 30)
+
+        draw.SetFont(font)
+
+        if options_indicators.desync_side:GetValue() then
+            draw.Color(0, 255, 0, 255)
+            draw.TextShadow(20, start, desyncside[gui.GetValue("rbot.antiaim.fakeyawstyle")])
+        end
+        if options_indicators.desync_amt:GetValue() then
+            draw.Color(255 - fDesyncAmount * 4.3, fDesyncAmount * 4.3, 0, 255) -- 58 * 4.3 = ~249 (close enough)
+            draw.TextShadow(20, start - 30, "FAKE")
+        end
+        if options_indicators.damage:GetValue() then
+            draw.Color(255, 255, 80, 255)
+            draw.TextShadow(20, start - 90, "-" .. iLastDamage)
+            draw.Color(120, 120, 255)
+            draw.TextShadow(20, start - 60, "-" .. iLastArmorDamage)
+        end
+    end
+end
+
 local function handleLBY() -- now global :)
 
     local lp = entities.GetLocalPlayer()
     local lby = lp:GetProp("m_flLowerBodyYawTarget")
-    local lbymode = options.lby_mode:GetValue() -- "Default", "Desync", "Real", "Between", "Opposite", "Spin", "Lisp"
+    local lbymode = options.lby_mode:GetValue() -- "Default", "Desync", "Real", "Between", "Opposite", "Spin"
 
     if lbymode == 0 then
         gui.SetValue("rbot.antiaim.lbyextend", 0)
-        return
+        return;
     else
         gui.SetValue("rbot.antiaim.lbyextend", 1)
     end
@@ -97,8 +111,7 @@ local function handleLBY() -- now global :)
         fPlayerRealAngle, -- real
         (fPlayerRealAngle + fPlayerDesyncAngle) / 2, -- between
         ((fPlayerRealAngle + fPlayerDesyncAngle) / 2) + 180, -- opposite
-        lby + 5, -- spin
-        fPlayerRealAngle - (360 - fDesyncAmount * 2) -- lisp
+        lby + 5 -- spin
     }
     lp:SetProp("m_flLowerBodyYawTarget", angles[lbymode])
 end
@@ -139,17 +152,20 @@ end
 local function handleDesyncWave() -- skeet will SMOKE this antiaim. nixware and otc will dump tho, aimware and ot are 50/50
     if options.aamode:GetValue() ~= 3 then return end
     local wavespeed = options.wavespeed:GetValue()
+    local olap = options.overlap_threshold:GetValue()
+    local desync = gui.GetValue("rbot.antiaim.desync")
+
     if wavespeed > 0 then -- forward
-        if gui.GetValue("rbot.antiaim.desync") == 58 then -- this makes it snap back
-            setDesync(0)
+        if desync == 58 then -- this makes it snap back
+            setDesync(olap)
         else
-            setDesync(gui.GetValue("rbot.antiaim.desync") + wavespeed) -- tried using tickcount but it was too slow, might try other timers because it seems fast
+            setDesync(desync + wavespeed) -- tried using tickcount but it was too slow, might try other timers because it seems fast
         end
     elseif wavespeed < 0 then -- backwards
-        if gui.GetValue("rbot.antiaim.desync") == 0 then
+        if desync >= olap then
             setDesync(58)
         else
-            setDesync(gui.GetValue("rbot.antiaim.desync") + wavespeed)
+            setDesync(desync + wavespeed)
         end
     end
 end
@@ -158,31 +174,16 @@ local function handleGUI() -- please dont look at this
 
     local mode = options.aamode:GetValue()
 
-    indicator_text[1]:SetPosY(17)
-
     -- some boolean logic to simplify menu code // Scape
-    gui_gbox_ple:SetInvisible( mode ~= 1)        -- prediction      (mode 1)
+    gui_gbox_ple:SetInvisible(mode ~= 1) -- prediction      (mode 1)
     gui_gbox_fakedesync:SetInvisible(mode ~= 2) -- fake desync      (mode 2)
-    gui_gbox_wave:SetInvisible(mode ~= 3)       -- wave             (mode 3)
-    gui_window_indicators:SetActive(options.indicator:GetValue() == 1)
+    gui_gbox_wave:SetInvisible(mode ~= 3) -- wave             (mode 3)
 
     if mode ~= 0 then
         gui.SetValue("rbot.antiaim.lbyextend", mode == 1)
     end
 
     options.xhairsize:SetInvisible(not options.xhair:GetValue())
-
-    local conditions = {
-        -- this is fine
-        tostring(isOverlapping()),
-        desyncside[gui.GetValue("rbot.antiaim.fakeyawstyle")],
-        tostring(fDesyncAmount) .. "°",
-        peekside[gui.GetValue("rbot.antiaim.autodirmode")]
-    }
-
-    for i = 1, #indicator_text do
-        indicator_text[i]:SetText(string.upper(conditions[i])) -- it's not lazy, it's efficient
-    end
 end
 
 local function handleCrosshair() -- fun fact this is just a copy of my team fortress 2 crosshair
@@ -204,12 +205,11 @@ local function handleCrosshair() -- fun fact this is just a copy of my team fort
     end
 
     draw.FilledRect(centW - size, centY - size, centW + size, centY + size)
-
 end
 
 local function handleShooting(event)
 
-if not (event:GetName() == 'weapon_fire') then return end
+    if not (event:GetName() == 'weapon_fire') then return end
 
     local lp = client.GetLocalPlayerIndex()
     local int_shooter = event:GetInt('userid')
@@ -223,16 +223,18 @@ if not (event:GetName() == 'weapon_fire') then return end
 end
 
 local function handleCrosshairEvent(event)
-    if(event:GetName() == 'player_hurt') then
+    if (event:GetName() == 'player_hurt') then
         local attacker = event:GetInt('attacker')
         local attackerindex = client.GetPlayerIndexByUserID(attacker)
-        if(attackerindex == client.GetLocalPlayerIndex()) then
+        if (attackerindex == client.GetLocalPlayerIndex()) then
             fAlpha = 255;
             if options.hitsound:GetValue() then
                 if debug then print("[HSOUND] Hit Registered") end
                 client.Command('playvol weapons/scar20/scar20_boltback 2', true)
                 gui.SetValue("esp.world.hiteffects.sound", 0)
             end
+            iLastDamage = event:GetInt('dmg_health')
+            iLastArmorDamage = event:GetInt('dmg_armor')
         end
     end
 end
@@ -264,7 +266,6 @@ callbacks.Register("CreateMove", function(cmd)
 
     handleDesyncInfo(cmd); -- wish there was a better way to do this so i could still pass args, maybe there is idk
     handleDoubleTap(cmd);
-
 end)
 
 callbacks.Register("Draw", function()
@@ -275,10 +276,10 @@ callbacks.Register("Draw", function()
     isOverlapping(); -- keeps indicator up-to-date, otherwise should only be used internally
     handleDesyncWave(); -- desync wave
     handleFakeDesync(); -- fake desync
-    handleAPL();        -- anti prediction/logic
-    handleLBY();        -- part of APL (may add to other antiaims)
-    handleCrosshair();
-
+    handleAPL(); -- anti prediction/logic
+    handleLBY(); -- now works for all aa's
+    handleCrosshair(); -- crosshair
+    handleIndicators(); -- indicators
 end)
 
 callbacks.Register("FireGameEvent", function(event)
@@ -290,4 +291,4 @@ client.AllowListener('player_hurt');
 client.AllowListener('weapon_fire');
 -- there's no reason this code should be this long but i'm too lazy to make proper functions for the gui and anti-aim modes. this is the pure raw shitty way that i prototype antiaim.
 -- this wasn't made for public release, i just felt like posting it. i won't give any support, if you don't understand how to config it then don't use it
--- if i catch someone selling this i will issue a dmca as it's licensed under GPL. feel free to edit and contribute to this project for personal use though
+-- if i catch someone selling this i will issue a dmca as it's licensed under GPL. feel free to edit or contribute to this project for personal use though
